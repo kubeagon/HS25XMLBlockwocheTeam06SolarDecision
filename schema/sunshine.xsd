@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+    <xs:simpleType name="MonthYYYYMM">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="\d{4}-\d{2}"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="IsoDateTimeNoTZ">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="ResolutionType">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="PT\d+H"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="SunshineMinutesPerHour">
+        <xs:restriction base="xs:decimal">
+            <xs:fractionDigits value="2"/>
+            <xs:minInclusive value="0.00"/>
+            <xs:maxInclusive value="60.00"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:element name="sunshine">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="region" minOccurs="1" maxOccurs="unbounded">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="series" minOccurs="1" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="value" minOccurs="1" maxOccurs="unbounded">
+                                            <xs:complexType>
+                                                <xs:simpleContent>
+                                                    <xs:extension base="SunshineMinutesPerHour">
+                                                        <xs:attribute name="datetime" type="IsoDateTimeNoTZ" use="required"/>
+                                                    </xs:extension>
+                                                </xs:simpleContent>
+                                            </xs:complexType>
+                                        </xs:element>
+                                    </xs:sequence>
+                                    <xs:attribute name="resolution" type="ResolutionType" use="required"/>
+                                </xs:complexType>
+
+                                <xs:unique name="uniqueValueDatetimeInSeries">
+                                    <xs:selector xpath="value"/>
+                                    <xs:field xpath="@datetime"/>
+                                </xs:unique>
+
+                            </xs:element>
+                        </xs:sequence>
+
+                        <xs:attribute name="id" type="xs:string" use="required"/>
+                        <xs:attribute name="name" type="xs:string" use="optional"/>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+
+            <xs:attribute name="month" type="MonthYYYYMM" use="required"/>
+            <xs:attribute name="timezone" type="xs:string" use="required"/>
+            <xs:attribute name="unit" type="xs:string" use="required"/>
+        </xs:complexType>
+
+        <xs:unique name="uniqueRegionId">
+            <xs:selector xpath="region"/>
+            <xs:field xpath="@id"/>
+        </xs:unique>
+
+    </xs:element>
+
+</xs:schema>

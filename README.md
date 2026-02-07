@@ -46,3 +46,10 @@ Die gesamte Anwendungslogik basiert auf XML und XSLT. JavaScript wird ausschlies
 ## Ziel
 
 Eine schlanke, standardkonforme Plattform, die XML nicht nur als Datenformat nutzt, sondern als **zentrales Architekturprinzip**, um nachvollziehbare, plausible und nutzerrelevante Entscheidungen für Solaranlagenbesitzer zu ermöglichen und so die Wirtschaftlichkeit zu erhöhen.
+
+---
+
+## Setup 
+
+java -jar tools/saxon-he.jar -xsl:csv_to_prices_xml.xsl -it:main -o:data/prices.xml csv-uri=imports/prices.csv
+java -jar tools\saxon-he.jar -xsl:csv_to_sunshine_xml.xsl -it:main -o:data/sunshine.xml csv-uri=imports/sunshine.csv

@@ -299,8 +299,8 @@
                                        value="{if ($dtNorm != '') then substring($dtNorm, 1, 16) else ''}"/>
                                 <button class="btn primary" type="submit">Empfehlung anzeigen</button>
                             </form>
-
-                            <div class="btn">Feedback senden</div>
+                            
+                            <a href="/feedback"><div class="btn primary">Feedback</div></a>
                             <div class="btn primary">PDF Export</div>
                         </div>
                     </div>

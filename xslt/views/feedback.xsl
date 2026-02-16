@@ -4,6 +4,7 @@
                 xmlns="http://www.w3.org/1999/xhtml">
     
     <xsl:param name="success" />
+    <xsl:param name="error" />
     
     <xsl:output method="xml" doctype-public="-//W3C//DTD XHTML 1.0 Strict//EN" doctype-system="http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd" indent="yes" encoding="UTF-8"/>
     
@@ -44,11 +45,22 @@
                     <xsl:choose>
                         <xsl:when test="$success = 'true'">
                             <div class="card success-view">
-                                <span class="success-icon">✔</span>
-                                <h1>Vielen dank!</h1>
+                                <span class="success-icon" style="color: #4BB543;">✔</span>
+                                <h1>Vielen Dank!</h1>
                                 <p>Ihr Feedback hilft uns, das Solar Decision Tool stetig weiter zu entwickeln.</p>
                                 <div style="margin-top: 20px;">
                                     <a href="/feedback" class="btn btn-primary">Weiteres Feedback erstellen</a>
+                                </div>
+                            </div>
+                        </xsl:when>
+                        
+                        <xsl:when test="$error = 'true'">
+                            <div class="card success-view" style="border-color: #ff4d4d;">
+                                <span class="success-icon" style="color: #ff4d4d;">✘</span>
+                                <h1 style="color: #d93025;">Fehler bei der Validierung</h1>
+                                <p>Das Feedback-Formular war ungültig und konnte nicht gespeichert werden.</p>
+                                <div style="margin-top: 20px;">
+                                    <a href="/feedback" class="btn btn-outline">Erneut versuchen</a>
                                 </div>
                             </div>
                         </xsl:when>
@@ -73,7 +85,7 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Kommentar</label>
-                                        <textarea name="comment" rows="4" required="required" placeholder="What did you think?"><xsl:text> </xsl:text></textarea>
+                                        <textarea name="comment" rows="4" required="required" placeholder="Was denken Sie?"><xsl:text> </xsl:text></textarea>
                                     </div>
                                     <button type="submit" class="btn btn-primary" style="width:100%">Feedback Übermitteln</button>
                                 </form>

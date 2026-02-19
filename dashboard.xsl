@@ -133,6 +133,7 @@
                     .subtitle{ color:var(--muted); margin-top:2px; font-size:13px; }
 
                     .actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+                    .actions a{ text-decoration:none; }
                     .btn{
                         background:var(--card);
                         border:1px solid var(--border);
@@ -302,8 +303,11 @@
                                 <button class="btn primary" type="submit">Empfehlung anzeigen</button>
                             </form>
                             
-                            <a href="/feedback"><div class="btn primary">Feedback</div></a>
-                            <div class="btn primary">PDF Export</div>
+                            <a href="/feedback" class="btn primary">Feedback</a>
+                            <a class="btn primary"
+                               href="/report.pdf{if ($dtNorm != '') then concat('?dt=', encode-for-uri(substring($dtNorm, 1, 16))) else ''}">
+                                PDF Export
+                            </a>
                         </div>
                     </div>
 

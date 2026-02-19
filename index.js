@@ -1,15 +1,95 @@
 const express = require('express')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const libxmljs = require('libxmljs2')
 const app = express()
 const { execFile } = require('child_process')
 
 const schemaCache = new Map();
+const PDF_RENDERER = (process.env.PDF_RENDERER || 'local').trim().toLowerCase()
+const FOP_REMOTE_URL = (process.env.FOP_REMOTE_URL || 'https://fop.xml.hslu-edu.ch/fop.php').trim()
 
 app.use(express.static(__dirname));
 app.use(express.text());
 app.use(express.urlencoded({ extended: false }));
+
+function runCommand(command, args, options = {}) {
+    return new Promise((resolve, reject) => {
+        execFile(command, args, { maxBuffer: 50 * 1024 * 1024, ...options }, (err, stdout, stderr) => {
+            if (err) {
+                const message = (stderr || err.message || '').trim()
+                reject(new Error(`${command} failed: ${message}`))
+                return
+            }
+            resolve({ stdout, stderr })
+        })
+    })
+}
+
+async function generateFoReport(dt) {
+    const saxonJar = path.resolve('tools', 'saxon-he.jar')
+    const xmlPath = path.resolve('data', 'recommendation.xml')
+    const xslPath = path.resolve('xslt', 'fo', 'report.fo.xsl')
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'solardecision-'))
+    const foPath = path.join(tempDir, 'report.fo')
+    const dtParam = (dt || '').trim()
+
+    const saxonArgs = [
+        '-jar', saxonJar,
+        `-s:${xmlPath}`,
+        `-xsl:${xslPath}`,
+        `-o:${foPath}`,
+        `dt=${dtParam}`
+    ]
+
+    try {
+        await runCommand('java', saxonArgs)
+        return fs.readFileSync(foPath)
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+}
+
+async function renderPdfLocal(foBuffer) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'solardecision-'))
+    const foPath = path.join(tempDir, 'report.fo')
+    const pdfPath = path.join(tempDir, 'report.pdf')
+
+    try {
+        fs.writeFileSync(foPath, foBuffer)
+        await runCommand('fop', ['-fo', foPath, '-pdf', pdfPath])
+        return fs.readFileSync(pdfPath)
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+}
+
+async function renderPdfRemote(foBuffer) {
+    const response = await fetch(FOP_REMOTE_URL, {
+        method: 'POST',
+        body: foBuffer,
+        headers: {
+            'Content-Type': 'application/xml'
+        }
+    })
+
+    if (!response.ok) {
+        const responseText = await response.text()
+        throw new Error(`Remote FOP failed (${response.status}): ${responseText}`)
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
+    return Buffer.from(arrayBuffer)
+}
+
+async function generatePdfReport(dt) {
+    const foBuffer = await generateFoReport(dt)
+    if (PDF_RENDERER === 'remote') {
+        return renderPdfRemote(foBuffer)
+    }
+    return renderPdfLocal(foBuffer)
+}
 
 app.get('/', (req, res) => {
     const dt = (req.query.dt || '').trim()
@@ -34,18 +114,33 @@ app.get('/', (req, res) => {
     })
 })
 
+app.get('/report.pdf', async (req, res) => {
+    try {
+        const dt = (req.query.dt || '').trim()
+        const pdfBuffer = await generatePdfReport(dt)
+        const safeDt = dt ? dt.replace(/[^0-9T-]/g, '_') : 'latest'
+
+        res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Disposition', `attachment; filename=\"solar-report-${safeDt}.pdf\"`)
+        res.status(200).send(pdfBuffer)
+    } catch (err) {
+        console.error('PDF generation failed:', err.message)
+        res.status(500).type('text/plain').send(err.message)
+    }
+})
+
 app.post('/convertToPdf', async (req, res) => {
-    const response = await fetch('https://fop.xml.hslu-edu.ch/fop.php', {
-        method: "POST",
-        mode: "cors",
-        cache: "no-cache",
-        credentials: "same-origin",
-        body: req.body,
-    });
-    const responseText = await (await response.blob()).arrayBuffer()
-    const buffer = Buffer.from(responseText)
-    fs.writeFileSync(path.resolve('temp.pdf'), buffer)
-    res.sendFile(path.resolve('temp.pdf'))
+    try {
+        const dt = typeof req.body === 'string'
+            ? req.body.trim()
+            : ((req.body && req.body.dt) ? String(req.body.dt).trim() : '')
+        const pdfBuffer = await generatePdfReport(dt)
+        res.setHeader('Content-Type', 'application/pdf')
+        res.status(200).send(pdfBuffer)
+    } catch (err) {
+        console.error('PDF generation failed:', err.message)
+        res.status(500).type('text/plain').send(err.message)
+    }
 })
 
 app.post('/updateData', (req, res) => {
@@ -176,4 +271,5 @@ function validateFeedbackForm(xmlDoc) {
 
 app.listen(3000, () => {
     console.log('listen on port', 3000)
+    console.log('pdf renderer:', PDF_RENDERER === 'remote' ? `remote (${FOP_REMOTE_URL})` : 'local')
 })

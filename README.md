@@ -88,3 +88,8 @@ Beispiel mit Original-Endpoint:
 ```bash
 PDF_RENDERER=remote FOP_REMOTE_URL=https://fop.xml.hslu-edu.ch/fop.php docker compose up --build
 ```
+
+### Errorview
+
+The errorview can be tested by using an incorrect query param `https://localhost:3000/report.pdf?dt=not-a-date"
+

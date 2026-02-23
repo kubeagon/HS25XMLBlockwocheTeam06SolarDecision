@@ -27,6 +27,31 @@ function runCommand(command, args, options = {}) {
     })
 }
 
+function createHttpError(status, message) {
+    const err = new Error(message)
+    err.status = status
+    return err
+}
+
+async function renderErrorView(statusCode, title, message, requestPath) {
+    const saxonJar = path.resolve('tools', 'saxon-he.jar')
+    const xmlPath = path.resolve('web', 'error.xml')
+    const xslPath = path.resolve('xslt', 'views', 'error-view.xsl')
+
+    const args = [
+        '-jar', saxonJar,
+        `-s:${xmlPath}`,
+        `-xsl:${xslPath}`,
+        `statusCode=${String(statusCode)}`,
+        `title=${title || 'Internal Server Error'}`,
+        `message=${message || 'Unexpected error'}`,
+        `requestPath=${requestPath || '/'}`
+    ]
+
+    const { stdout } = await runCommand('java', args)
+    return stdout
+}
+
 async function generateFoReport(dt) {
     const saxonJar = path.resolve('tools', 'saxon-he.jar')
     const xmlPath = path.resolve('data', 'recommendation.xml')
@@ -91,7 +116,7 @@ async function generatePdfReport(dt) {
     return renderPdfLocal(foBuffer)
 }
 
-app.get('/', (req, res) => {
+app.get('/', (req, res, next) => {
     const dt = (req.query.dt || '').trim()
 
     const saxonJar = path.resolve('tools', 'saxon-he.jar')
@@ -107,14 +132,14 @@ app.get('/', (req, res) => {
 
     execFile('java', args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
-            res.status(500).type('text/plain').send(stderr || err.message)
+            next(createHttpError(500, stderr || err.message))
             return
         }
         res.status(200).type('application/xhtml+xml').send(stdout)
     })
 })
 
-app.get('/report.pdf', async (req, res) => {
+app.get('/report.pdf', async (req, res, next) => {
     try {
         const dt = (req.query.dt || '').trim()
         const pdfBuffer = await generatePdfReport(dt)
@@ -125,11 +150,11 @@ app.get('/report.pdf', async (req, res) => {
         res.status(200).send(pdfBuffer)
     } catch (err) {
         console.error('PDF generation failed:', err.message)
-        res.status(500).type('text/plain').send(err.message)
+        next(createHttpError(500, err.message))
     }
 })
 
-app.post('/convertToPdf', async (req, res) => {
+app.post('/convertToPdf', async (req, res, next) => {
     try {
         const dt = typeof req.body === 'string'
             ? req.body.trim()
@@ -139,34 +164,58 @@ app.post('/convertToPdf', async (req, res) => {
         res.status(200).send(pdfBuffer)
     } catch (err) {
         console.error('PDF generation failed:', err.message)
-        res.status(500).type('text/plain').send(err.message)
+        next(createHttpError(500, err.message))
     }
 })
 
-app.post('/updateData', (req, res) => {
-    const dataToUpdate = req.body
-    // read database xml
-    const databasePath = path.resolve('data', 'database.xml');
-    const databaseXml = fs.readFileSync(databasePath, 'utf-8')
-    const xmlDocDatabase = libxmljs.parseXml(databaseXml)
-    // select node to update
-    const plantStatistics = xmlDocDatabase.get(`//plant[name="${dataToUpdate.plant}"]/statistics`);
-    // create new node with attribute etc.
-    plantStatistics.node('price', dataToUpdate.price).attr('date', dataToUpdate.date)
-    console.log(xmlDocDatabase.toString())
+app.post('/updateData', (req, res, next) => {
+    try {
+        const dataToUpdate = (req.body && typeof req.body === 'object') ? req.body : {}
+        const plantName = String(dataToUpdate.plant || '').trim()
+        const priceValue = String(dataToUpdate.price || '').trim()
+        const dateValue = String(dataToUpdate.date || '').trim()
 
-    // validate new database against schema
-    const valid = validateDatabase(xmlDocDatabase)
-    if (!valid) {
-        res.status(400).send('Invalid XML')
-        return
+        if (!plantName || !priceValue || !dateValue) {
+            res.status(400).send('Missing required fields: plant, price, date')
+            return
+        }
+
+        const databasePath = path.resolve('data', 'database.xml')
+        const databaseXml = fs.readFileSync(databasePath, 'utf-8')
+        const xmlDocDatabase = libxmljs.parseXml(databaseXml)
+
+        const plants = xmlDocDatabase.find('//plant')
+        const selectedPlant = plants.find((plantNode) => {
+            const nameNode = plantNode.get('./name')
+            return nameNode && nameNode.text().trim() === plantName
+        })
+
+        if (!selectedPlant) {
+            res.status(404).send(`Unknown plant: ${plantName}`)
+            return
+        }
+
+        const plantStatistics = selectedPlant.get('./statistics')
+        if (!plantStatistics) {
+            return next(createHttpError(500, `Plant has no statistics node: ${plantName}`))
+        }
+
+        plantStatistics.node('price', priceValue).attr('date', dateValue)
+
+        const valid = validateDatabase(xmlDocDatabase)
+        if (!valid) {
+            res.status(400).send('Invalid XML')
+            return
+        }
+
+        fs.writeFileSync(databasePath, xmlDocDatabase.toString(), 'utf-8')
+        res.sendStatus(200)
+    } catch (err) {
+        next(err)
     }
-    // write new database.xml
-    fs.writeFileSync(databasePath, xmlDocDatabase.toString(), 'utf-8')
-    res.sendStatus(200)
 })
 
-app.get('/feedback', (req, res) => {
+app.get('/feedback', (req, res, next) => {
     const saxonJar = path.resolve('tools', 'saxon-he.jar')
     const xmlPath = path.resolve('data', 'feedback.xml')
     const xslPath = path.resolve('xslt', 'views', 'feedback.xsl')
@@ -185,7 +234,7 @@ app.get('/feedback', (req, res) => {
     execFile('java', args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
             console.error("Java Saxon Error:", stderr)
-            res.status(500).type('text/plain').send("Transformation Error: " + (stderr || err.message))
+            next(createHttpError(500, "Transformation Error: " + (stderr || err.message)))
             return;
         }
         // Send the output as XHTML/HTML
@@ -242,6 +291,11 @@ function validatePrices(xmlDoc) {
     return validate(xmlDoc, pricesSchema)
 }
 
+function validateDatabase(xmlDoc) {
+    const databaseSchema = fs.readFileSync(path.resolve('schema', 'database.xsd'), 'utf-8')
+    return validate(xmlDoc, databaseSchema)
+}
+
 function validateUV(xmlDoc) {
     const uvSchema = fs.readFileSync(path.resolve('schema', 'sunshine.xsd'), 'utf-8')
     return validate(xmlDoc, uvSchema)
@@ -268,6 +322,28 @@ function validateFeedbackForm(xmlDoc) {
         return false
     }
 }
+
+app.use(async (err, req, res, next) => {
+    if (res.headersSent) {
+        next(err)
+        return
+    }
+
+    const statusCode = Number(err.status || 500)
+    const normalizedStatus = statusCode >= 400 ? statusCode : 500
+    const title = normalizedStatus === 404 ? 'Not Found' : 'Internal Server Error'
+    const message = err && err.message ? err.message : 'Unexpected error'
+
+    console.error('Serverfehler:', err && err.stack ? err.stack : err)
+
+    try {
+        const html = await renderErrorView(normalizedStatus, title, message, req.originalUrl || req.path || '/')
+        res.status(normalizedStatus).type('text/html').send(html)
+    } catch (renderErr) {
+        console.error('Error view rendering failed:', renderErr.message)
+        res.status(500).type('text/plain').send('Internal Server Error')
+    }
+})
 
 app.listen(3000, () => {
     console.log('listen on port', 3000)

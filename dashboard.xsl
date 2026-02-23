@@ -303,7 +303,9 @@
                                 <button class="btn primary" type="submit">Empfehlung anzeigen</button>
                             </form>
                             
+                            <!-- Removed the <div> wrapper around the buttons -->
                             <a href="/feedback" class="btn primary">Feedback</a>
+                            <!-- Base URL is always report.pdf, if $dtNorm is not empty, append query parameter -->
                             <a class="btn primary"
                                href="/report.pdf{if ($dtNorm != '') then concat('?dt=', encode-for-uri(substring($dtNorm, 1, 16))) else ''}">
                                 PDF Export

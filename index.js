@@ -1,12 +1,13 @@
 const express = require('express')
 const path = require('path')
 const fs = require('fs')
-const os = require('os')
+const os = require('os') // used for temporary directory management
 const libxmljs = require('libxmljs2')
 const app = express()
 const { execFile } = require('child_process')
 
 const schemaCache = new Map();
+// Choose between local Apache FOP rendering and remote FOP service rendering.
 const PDF_RENDERER = (process.env.PDF_RENDERER || 'local').trim().toLowerCase()
 const FOP_REMOTE_URL = (process.env.FOP_REMOTE_URL || 'https://fop.xml.hslu-edu.ch/fop.php').trim()
 
@@ -15,9 +16,12 @@ app.use(express.text());
 app.use(express.urlencoded({ extended: false }));
 
 function runCommand(command, args, options = {}) {
+    // Run shell commands in one place so the rest of the code can simply use await + try/catch.
     return new Promise((resolve, reject) => {
+        // Keep one shared process config (e.g. larger output buffer for Saxon/FOP logs).
         execFile(command, args, { maxBuffer: 50 * 1024 * 1024, ...options }, (err, stdout, stderr) => {
             if (err) {
+                // Normalize subprocess failures into one consistent error shape.
                 const message = (stderr || err.message || '').trim()
                 reject(new Error(`${command} failed: ${message}`))
                 return
@@ -28,12 +32,14 @@ function runCommand(command, args, options = {}) {
 }
 
 function createHttpError(status, message) {
+    // Helper to pass HTTP status + message into Express error middleware.
     const err = new Error(message)
     err.status = status
     return err
 }
 
 async function renderErrorView(statusCode, title, message, requestPath) {
+    // Build the error page by transforming error.xml with the XSLT error view.
     const saxonJar = path.resolve('tools', 'saxon-he.jar')
     const xmlPath = path.resolve('web', 'error.xml')
     const xslPath = path.resolve('xslt', 'views', 'error-view.xsl')
@@ -53,6 +59,7 @@ async function renderErrorView(statusCode, title, message, requestPath) {
 }
 
 async function generateFoReport(dt) {
+    // Step 1: recommendation XML -> FO file (via Saxon).
     const saxonJar = path.resolve('tools', 'saxon-he.jar')
     const xmlPath = path.resolve('data', 'recommendation.xml')
     const xslPath = path.resolve('xslt', 'fo', 'report.fo.xsl')
@@ -77,6 +84,7 @@ async function generateFoReport(dt) {
 }
 
 async function renderPdfLocal(foBuffer) {
+    // Step 2a: FO -> PDF using local Apache FOP binary.
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'solardecision-'))
     const foPath = path.join(tempDir, 'report.fo')
     const pdfPath = path.join(tempDir, 'report.pdf')
@@ -91,6 +99,7 @@ async function renderPdfLocal(foBuffer) {
 }
 
 async function renderPdfRemote(foBuffer) {
+    // Step 2b: FO -> PDF by sending FO to remote FOP endpoint.
     const response = await fetch(FOP_REMOTE_URL, {
         method: 'POST',
         body: foBuffer,
@@ -109,6 +118,7 @@ async function renderPdfRemote(foBuffer) {
 }
 
 async function generatePdfReport(dt) {
+    // Single entry point for the full report pipeline (XML -> FO -> PDF).
     const foBuffer = await generateFoReport(dt)
     if (PDF_RENDERER === 'remote') {
         return renderPdfRemote(foBuffer)
@@ -170,6 +180,7 @@ app.post('/convertToPdf', async (req, res, next) => {
 
 app.post('/updateData', (req, res, next) => {
     try {
+        // Normalize incoming values and reject incomplete updates early.
         const dataToUpdate = (req.body && typeof req.body === 'object') ? req.body : {}
         const plantName = String(dataToUpdate.plant || '').trim()
         const priceValue = String(dataToUpdate.price || '').trim()
@@ -185,6 +196,7 @@ app.post('/updateData', (req, res, next) => {
         const xmlDocDatabase = libxmljs.parseXml(databaseXml)
 
         const plants = xmlDocDatabase.find('//plant')
+        // Match by plant name instead of building XPath with raw user input.
         const selectedPlant = plants.find((plantNode) => {
             const nameNode = plantNode.get('./name')
             return nameNode && nameNode.text().trim() === plantName
@@ -204,6 +216,7 @@ app.post('/updateData', (req, res, next) => {
 
         const valid = validateDatabase(xmlDocDatabase)
         if (!valid) {
+            // Keep invalid XML out of the persisted data file.
             res.status(400).send('Invalid XML')
             return
         }
@@ -324,6 +337,7 @@ function validateFeedbackForm(xmlDoc) {
 }
 
 app.use(async (err, req, res, next) => {
+    // Centralized fallback for unexpected server errors.
     if (res.headersSent) {
         next(err)
         return
